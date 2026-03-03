@@ -1,0 +1,11 @@
+.app {
+  width: 100%;
+  min-height: 100vh;
+  padding: 2rem 0;
+}
+
+@media (max-width: 640px) {
+  .app {
+    padding: 1rem 0;
+  }
+}

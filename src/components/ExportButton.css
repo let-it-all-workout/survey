@@ -1,0 +1,33 @@
+.export-button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.875rem 1.5rem;
+  background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+  color: white;
+  border: none;
+  border-radius: 12px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 6px rgba(79, 70, 229, 0.2);
+}
+
+.export-button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 12px rgba(79, 70, 229, 0.3);
+}
+
+.export-button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.export-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.export-button svg {
+  flex-shrink: 0;
+}
