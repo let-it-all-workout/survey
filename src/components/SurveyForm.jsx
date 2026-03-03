@@ -312,7 +312,13 @@ const SurveyForm = () => {
       localStorage.removeItem('surveyProgress');
       localStorage.removeItem('surveyStep');
     } catch (err) {
-      setError('Failed to submit response. Please check your internet connection and try again.');
+      if (err.message.includes('already submitted')) {
+        setError('This matric number has already submitted a response. Each student can only submit once.');
+      } else if (err.message.includes('Too many')) {
+        setError('Too many submissions. Please wait a minute and try again.');
+      } else {
+        setError('Failed to submit response. Please check your internet connection and try again.');
+      }
       console.error('Submission error:', err);
     } finally {
       setIsSubmitting(false);

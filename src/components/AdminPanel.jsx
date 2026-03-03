@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getResponses, getStatistics, deleteResponse } from '../utils/api';
+import { getResponses, getStatistics, deleteResponse, adminLogin, clearAdminToken } from '../utils/api';
 import { convertToCSV, downloadCSV } from '../utils/csvExport';
 import './AdminPanel.css';
 
@@ -8,6 +8,7 @@ const AdminPanel = ({ onBack }) => {
   const [statistics, setStatistics] = useState(null);
   const [password, setPassword] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [loginError, setLoginError] = useState('');
   const [loading, setLoading] = useState(false);
   const [totalResponses, setTotalResponses] = useState(0);
 
@@ -19,9 +20,6 @@ const AdminPanel = ({ onBack }) => {
     startDate: '',
     endDate: ''
   });
-
-  // Default password - change this to your preferred password
-  const ADMIN_PASSWORD = 'researcher2024';
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -42,25 +40,34 @@ const AdminPanel = ({ onBack }) => {
       setStatistics(statsData.data || null);
     } catch (error) {
       console.error('Error loading data:', error);
-      alert('Failed to load data. Make sure the server is running.');
+      if (error.message === 'Unauthorized') {
+        setIsAuthenticated(false);
+        clearAdminToken();
+        alert('Session expired. Please log in again.');
+      } else {
+        alert('Failed to load data. Make sure the server is running.');
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  const handleLogin = (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
-    if (password === ADMIN_PASSWORD) {
+    setLoginError('');
+    try {
+      await adminLogin(password);
       setIsAuthenticated(true);
       setPassword('');
-    } else {
-      alert('Incorrect password. Access denied.');
+    } catch {
+      setLoginError('Incorrect password. Access denied.');
       setPassword('');
     }
   };
 
   const handleLogout = () => {
     setIsAuthenticated(false);
+    clearAdminToken();
     setPassword('');
     setFilters({
       department: '',
@@ -134,6 +141,7 @@ const AdminPanel = ({ onBack }) => {
               required
               autoFocus
             />
+            {loginError && <p className="login-error">{loginError}</p>}
             <div className="login-actions">
               <button type="submit" className="btn btn-primary">
                 Access Admin Panel

@@ -48,6 +48,16 @@
   gap: 0.75rem;
 }
 
+.login-error {
+  color: #dc2626;
+  background: #fee2e2;
+  padding: 0.75rem;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  margin-bottom: 1rem;
+}
+
 .admin-header {
   display: flex;
   justify-content: space-between;

@@ -10,10 +10,52 @@ const __dirname = dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3001;
 const DATA_FILE = join(__dirname, 'responses.json');
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'researcher2024';
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50kb' }));
+
+// Rate limiting - simple in-memory tracker
+const rateLimitMap = new Map();
+const RATE_LIMIT_WINDOW = 60 * 1000; // 1 minute
+const MAX_SUBMISSIONS_PER_WINDOW = 3;
+
+const checkRateLimit = (ip) => {
+  const now = Date.now();
+  const record = rateLimitMap.get(ip);
+
+  if (!record || now - record.windowStart > RATE_LIMIT_WINDOW) {
+    rateLimitMap.set(ip, { windowStart: now, count: 1 });
+    return true;
+  }
+
+  if (record.count >= MAX_SUBMISSIONS_PER_WINDOW) {
+    return false;
+  }
+
+  record.count++;
+  return true;
+};
+
+// Clean up stale rate limit entries every 5 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, record] of rateLimitMap) {
+    if (now - record.windowStart > RATE_LIMIT_WINDOW) {
+      rateLimitMap.delete(ip);
+    }
+  }
+}, 5 * 60 * 1000);
+
+// Admin authentication middleware
+const requireAdmin = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || authHeader !== `Bearer ${ADMIN_PASSWORD}`) {
+    return res.status(401).json({ success: false, error: 'Unauthorized' });
+  }
+  next();
+};
 
 // Initialize data file if it doesn't exist
 if (!existsSync(DATA_FILE)) {
@@ -41,44 +83,105 @@ const writeResponses = (responses) => {
   }
 };
 
+// Sanitize string input
+const sanitize = (str) => {
+  if (typeof str !== 'string') return str;
+  return str.trim().slice(0, 500);
+};
+
+// Whitelist of allowed fields from the survey
+const ALLOWED_FIELDS = [
+  'matric_number', 'department', 'department_other', 'level', 'gender',
+  'hours_per_day', 'primary_uses', 'lecture_distraction',
+  'academic_performance', 'concentration', 'sleep_impact',
+  'social_impact', 'health_issues', 'dependency', 'recommendations'
+];
+
 // Routes
 
-// Submit survey response
+// Admin login verification (server-side)
+app.post('/api/admin/login', (req, res) => {
+  const { password } = req.body;
+  if (password === ADMIN_PASSWORD) {
+    res.json({ success: true, token: ADMIN_PASSWORD });
+  } else {
+    res.status(401).json({ success: false, error: 'Incorrect password' });
+  }
+});
+
+// Submit survey response (public, rate-limited)
 app.post('/api/responses', (req, res) => {
   try {
+    const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+
+    if (!checkRateLimit(clientIp)) {
+      return res.status(429).json({
+        success: false,
+        error: 'Too many submissions. Please wait a minute before trying again.'
+      });
+    }
+
     const data = req.body;
+
+    // Validate matric number is present
+    if (!data.matric_number || typeof data.matric_number !== 'string' || data.matric_number.trim().length < 3) {
+      return res.status(400).json({ success: false, error: 'Valid matric number is required' });
+    }
+
+    // Check for duplicate matric number
     const responses = readResponses();
-    
+    const normalizedMatric = data.matric_number.trim().toUpperCase();
+    const duplicate = responses.find(
+      r => r.matric_number && r.matric_number.toUpperCase() === normalizedMatric
+    );
+    if (duplicate) {
+      return res.status(409).json({
+        success: false,
+        error: 'This matric number has already submitted a response.'
+      });
+    }
+
+    // Build response with only allowed fields, sanitized
+    const sanitizedData = {};
+    for (const field of ALLOWED_FIELDS) {
+      if (data[field] !== undefined) {
+        if (Array.isArray(data[field])) {
+          sanitizedData[field] = data[field].map(v => sanitize(String(v))).slice(0, 20);
+        } else {
+          sanitizedData[field] = sanitize(String(data[field]));
+        }
+      }
+    }
+
     const newResponse = {
       id: responses.length > 0 ? Math.max(...responses.map(r => r.id)) + 1 : 1,
-      ...data,
+      ...sanitizedData,
       submittedAt: new Date().toISOString()
     };
 
     responses.push(newResponse);
-    
+
     if (writeResponses(responses)) {
-      res.json({ 
-        success: true, 
+      res.json({
+        success: true,
         id: newResponse.id,
-        message: 'Response saved successfully' 
+        message: 'Response saved successfully'
       });
     } else {
       res.status(500).json({ success: false, error: 'Failed to save response' });
     }
   } catch (error) {
     console.error('Error saving response:', error);
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });
 
-// Get all responses with filtering
-app.get('/api/responses', (req, res) => {
+// Get all responses with filtering (admin only)
+app.get('/api/responses', requireAdmin, (req, res) => {
   try {
     const { department, level, gender, startDate, endDate } = req.query;
     let responses = readResponses();
-    
-    // Apply filters
+
     if (department) {
       responses = responses.filter(r => r.department === department);
     }
@@ -95,100 +198,84 @@ app.get('/api/responses', (req, res) => {
       responses = responses.filter(r => r.submittedAt <= endDate);
     }
 
-    // Sort by submission date (newest first)
     responses.sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt));
 
-    res.json({ 
-      success: true, 
-      data: responses, 
+    res.json({
+      success: true,
+      data: responses,
       total: responses.length
     });
   } catch (error) {
     console.error('Error fetching responses:', error);
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });
 
-// Get statistics
-app.get('/api/statistics', (req, res) => {
+// Get statistics (admin only)
+app.get('/api/statistics', requireAdmin, (req, res) => {
   try {
     const responses = readResponses();
-    
+
     const departmentStats = {};
     const levelStats = {};
     const genderStats = {};
     const hoursStats = {};
 
     responses.forEach(response => {
-      // Department stats
       if (response.department) {
         departmentStats[response.department] = (departmentStats[response.department] || 0) + 1;
       }
-      
-      // Level stats
       if (response.level) {
         levelStats[response.level] = (levelStats[response.level] || 0) + 1;
       }
-      
-      // Gender stats
       if (response.gender) {
         genderStats[response.gender] = (genderStats[response.gender] || 0) + 1;
       }
-      
-      // Hours stats
       if (response.hours_per_day) {
         hoursStats[response.hours_per_day] = (hoursStats[response.hours_per_day] || 0) + 1;
       }
     });
 
-    // Convert to array format
-    const departmentArray = Object.entries(departmentStats)
-      .map(([department, count]) => ({ department, count }))
-      .sort((a, b) => b.count - a.count);
-    
-    const levelArray = Object.entries(levelStats)
-      .map(([level, count]) => ({ level, count }))
-      .sort((a, b) => b.count - a.count);
-    
-    const genderArray = Object.entries(genderStats)
-      .map(([gender, count]) => ({ gender, count }))
-      .sort((a, b) => b.count - a.count);
-    
-    const hoursArray = Object.entries(hoursStats)
-      .map(([hours_per_day, count]) => ({ hours_per_day, count }))
-      .sort((a, b) => b.count - a.count);
+    const toSortedArray = (obj, key) =>
+      Object.entries(obj)
+        .map(([name, count]) => ({ [key]: name, count }))
+        .sort((a, b) => b.count - a.count);
 
     res.json({
       success: true,
       data: {
         totalResponses: responses.length,
-        departmentStats: departmentArray,
-        levelStats: levelArray,
-        genderStats: genderArray,
-        hoursStats: hoursArray
+        departmentStats: toSortedArray(departmentStats, 'department'),
+        levelStats: toSortedArray(levelStats, 'level'),
+        genderStats: toSortedArray(genderStats, 'gender'),
+        hoursStats: toSortedArray(hoursStats, 'hours_per_day')
       }
     });
   } catch (error) {
     console.error('Error fetching statistics:', error);
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });
 
-// Delete response
-app.delete('/api/responses/:id', (req, res) => {
+// Delete response (admin only)
+app.delete('/api/responses/:id', requireAdmin, (req, res) => {
   try {
     const { id } = req.params;
-    const responses = readResponses();
     const responseId = parseInt(id);
-    
+
+    if (isNaN(responseId)) {
+      return res.status(400).json({ success: false, error: 'Invalid response ID' });
+    }
+
+    const responses = readResponses();
     const index = responses.findIndex(r => r.id === responseId);
-    
+
     if (index === -1) {
       return res.status(404).json({ success: false, error: 'Response not found' });
     }
 
     responses.splice(index, 1);
-    
+
     if (writeResponses(responses)) {
       res.json({ success: true, message: 'Response deleted successfully' });
     } else {
@@ -196,7 +283,7 @@ app.delete('/api/responses/:id', (req, res) => {
     }
   } catch (error) {
     console.error('Error deleting response:', error);
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });
 
