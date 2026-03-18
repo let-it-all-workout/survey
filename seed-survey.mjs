@@ -1,7 +1,10 @@
 const LIVE_API_URL = 'https://survey-production-7290.up.railway.app/api';
 const API_BASE_URL = process.env.SEED_API_URL || LIVE_API_URL;
-const TOTAL = Number(process.argv[2] || 1);
-const WAIT_MS = Number(process.env.SEED_WAIT_MS || 22000);
+const TOTAL = Number(process.argv[2] || 5);
+const WAIT_MIN_MS = Number(process.env.SEED_WAIT_MIN_MS || 60000); // 1 minute
+const WAIT_MAX_MS = Number(process.env.SEED_WAIT_MAX_MS || 120000); // 2 minutes
+const SUBMITTED_START = new Date(process.env.SEED_DATE_START || '2026-02-25T00:00:00.000Z').getTime();
+const SUBMITTED_END = new Date(process.env.SEED_DATE_END || '2026-03-12T23:59:59.999Z').getTime();
 
 const matricYears = ['2022', '2023', '2024', '2025'];
 const departmentCodes = ['CSC', 'POS', 'MCB', 'BCH', 'ACC', 'BKF', 'MAC', 'NUR', 'BUS', 'HIR', 'ECO'];
@@ -45,12 +48,15 @@ const healthIssues = [
 const dependency = ['Totally fine', 'A bit uncomfortable', 'Very uncomfortable', 'Cannot imagine it'];
 
 const pickOne = (arr) => arr[Math.floor(Math.random() * arr.length)];
+const pickNumber = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
 const pickMany = (arr, min = 1, max = 3) => {
   const copy = [...arr].sort(() => Math.random() - 0.5);
   const count = Math.max(min, Math.min(max, Math.floor(Math.random() * (max - min + 1)) + min));
   return copy.slice(0, count);
 };
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const randomDelayMs = () => pickNumber(WAIT_MIN_MS, WAIT_MAX_MS);
+const randomSubmittedAt = () => new Date(pickNumber(SUBMITTED_START, SUBMITTED_END)).toISOString();
 
 const makeMatric = (index) => {
   const year = pickOne(matricYears);
@@ -73,7 +79,8 @@ const buildPayload = (index) => ({
   social_impact: pickOne(socialImpact),
   health_issues: pickMany(healthIssues, 1, 2),
   dependency: pickOne(dependency),
-  recommendations: `Automated test response ${index + 1}`
+  recommendations: `Automated test response ${index + 1}`,
+  submittedAtOverride: randomSubmittedAt()
 });
 
 const submitOne = async (payload, index) => {
@@ -100,7 +107,10 @@ const submitOne = async (payload, index) => {
 
 const run = async () => {
   console.log(`Seeding ${TOTAL} survey response(s) to ${API_BASE_URL}/responses`);
-  console.log(`Wait between submissions: ${WAIT_MS}ms`);
+  console.log(`Wait between submissions: random ${WAIT_MIN_MS}-${WAIT_MAX_MS}ms`);
+  console.log(
+    `Submitted date range: ${new Date(SUBMITTED_START).toISOString()} to ${new Date(SUBMITTED_END).toISOString()}`
+  );
 
   let successCount = 0;
 
@@ -110,15 +120,19 @@ const run = async () => {
       const result = await submitOne(payload, i);
       successCount += 1;
       console.log(
-        `[${i + 1}/${TOTAL}] Submitted: ${payload.matric_number} (id: ${result?.id ?? 'n/a'})`
+        `[${i + 1}/${TOTAL}] Submitted: ${payload.matric_number} @ ${payload.submittedAtOverride} (id: ${
+          result?.id ?? 'n/a'
+        })`
       );
     } catch (error) {
       const details = error?.cause?.message ? ` (${error.cause.message})` : '';
       console.error(`[${i + 1}/${TOTAL}] ${error.message}${details}`);
     }
 
-    if (i < TOTAL - 1 && WAIT_MS > 0) {
-      await sleep(WAIT_MS);
+    if (i < TOTAL - 1) {
+      const waitMs = randomDelayMs();
+      console.log(`[${i + 1}/${TOTAL}] Waiting ${Math.round(waitMs / 1000)}s before next submit...`);
+      await sleep(waitMs);
     }
   }
 

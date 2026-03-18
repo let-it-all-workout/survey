@@ -11,6 +11,7 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 const DATA_FILE = join(__dirname, 'responses.json');
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'researcher2024';
+const ALLOW_TEST_DATE_OVERRIDE = process.env.ALLOW_TEST_DATE_OVERRIDE === 'true';
 
 // Middleware
 app.use(cors());
@@ -89,6 +90,13 @@ const sanitize = (str) => {
   return str.trim().slice(0, 500);
 };
 
+const parseOverrideDate = (value) => {
+  if (typeof value !== 'string') return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString();
+};
+
 // Whitelist of allowed fields from the survey
 const ALLOWED_FIELDS = [
   'matric_number', 'department', 'department_other', 'level', 'gender',
@@ -153,10 +161,13 @@ app.post('/api/responses', (req, res) => {
       }
     }
 
+    const submittedAtOverride =
+      ALLOW_TEST_DATE_OVERRIDE ? parseOverrideDate(data.submittedAtOverride) : null;
+
     const newResponse = {
       id: responses.length > 0 ? Math.max(...responses.map(r => r.id)) + 1 : 1,
       ...sanitizedData,
-      submittedAt: new Date().toISOString()
+      submittedAt: submittedAtOverride || new Date().toISOString()
     };
 
     responses.push(newResponse);
