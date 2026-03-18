@@ -98,3 +98,27 @@ export const deleteResponse = async (id) => {
 
   return result;
 };
+
+export const deleteResponses = async (filters = {}) => {
+  const queryParams = new URLSearchParams();
+
+  if (filters.department) queryParams.append('department', filters.department);
+  if (filters.level) queryParams.append('level', filters.level);
+  if (filters.gender) queryParams.append('gender', filters.gender);
+  if (filters.startDate) queryParams.append('startDate', filters.startDate);
+  if (filters.endDate) queryParams.append('endDate', filters.endDate);
+
+  const url = `${API_BASE_URL}/responses${queryParams.toString() ? '?' + queryParams.toString() : ''}`;
+  const response = await fetch(url, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  });
+
+  const result = await response.json();
+
+  if (!response.ok) {
+    throw new Error(result.error || 'Failed to delete responses');
+  }
+
+  return result;
+};

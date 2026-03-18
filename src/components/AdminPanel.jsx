@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getResponses, getStatistics, deleteResponse, adminLogin, clearAdminToken } from '../utils/api';
+import { getResponses, getStatistics, deleteResponse, deleteResponses, adminLogin, clearAdminToken } from '../utils/api';
 import { convertToCSV, downloadCSV } from '../utils/csvExport';
 import './AdminPanel.css';
 
@@ -95,6 +95,8 @@ const AdminPanel = ({ onBack }) => {
     });
   };
 
+  const hasActiveFilters = Object.values(filters).some((f) => f);
+
   const handleDelete = async (id) => {
     if (!confirm('Are you sure you want to delete this response?')) {
       return;
@@ -106,6 +108,34 @@ const AdminPanel = ({ onBack }) => {
       alert('Response deleted successfully');
     } catch (error) {
       alert('Failed to delete response');
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (responses.length === 0) {
+      alert('No responses to delete.');
+      return;
+    }
+
+    const targetLabel = hasActiveFilters ? 'filtered responses' : 'ALL responses';
+    const firstConfirm = confirm(
+      `You are about to delete ${targetLabel} (${responses.length} item(s) currently shown). Continue?`
+    );
+    if (!firstConfirm) return;
+
+    const secondConfirm = confirm(
+      hasActiveFilters
+        ? 'Final confirmation: delete these filtered responses permanently?'
+        : 'Final confirmation: delete ALL responses permanently?'
+    );
+    if (!secondConfirm) return;
+
+    try {
+      const result = await deleteResponses(hasActiveFilters ? filters : {});
+      await loadData();
+      alert(result?.message || 'Bulk delete completed.');
+    } catch (error) {
+      alert(error.message || 'Failed to bulk delete responses');
     }
   };
 
@@ -293,14 +323,17 @@ const AdminPanel = ({ onBack }) => {
             <button className="btn btn-primary" onClick={handleExport}>
               Export Filtered Results
             </button>
+            <button className="btn btn-danger" onClick={handleBulkDelete}>
+              {hasActiveFilters ? 'Delete Filtered' : 'Delete All'}
+            </button>
           </div>
         </div>
       </div>
 
       {responses.length === 0 ? (
         <div className="no-responses">
-          <p>No responses found{Object.values(filters).some(f => f) ? ' matching your filters' : ''}.</p>
-          {!Object.values(filters).some(f => f) && (
+          <p>No responses found{hasActiveFilters ? ' matching your filters' : ''}.</p>
+          {!hasActiveFilters && (
             <p>Responses will appear here once students submit the survey.</p>
           )}
         </div>

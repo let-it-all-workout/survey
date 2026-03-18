@@ -137,6 +137,29 @@ const canBypassRateLimit = (req) => {
   return seedHeader === SEED_BYPASS_TOKEN && typeof req.body?.submittedAtOverride === 'string';
 };
 
+const applyResponseFilters = (responses, filters = {}) => {
+  const { department, level, gender, startDate, endDate } = filters;
+  let filtered = [...responses];
+
+  if (department) {
+    filtered = filtered.filter((r) => r.department === department);
+  }
+  if (level) {
+    filtered = filtered.filter((r) => r.level === level);
+  }
+  if (gender) {
+    filtered = filtered.filter((r) => r.gender === gender);
+  }
+  if (startDate) {
+    filtered = filtered.filter((r) => r.submittedAt >= startDate);
+  }
+  if (endDate) {
+    filtered = filtered.filter((r) => r.submittedAt <= endDate);
+  }
+
+  return filtered;
+};
+
 // Whitelist of allowed fields from the survey
 const ALLOWED_FIELDS = [
   'matric_number', 'department', 'department_other', 'level', 'gender',
@@ -230,24 +253,8 @@ app.post('/api/responses', (req, res) => {
 // Get all responses with filtering (admin only)
 app.get('/api/responses', requireAdmin, (req, res) => {
   try {
-    const { department, level, gender, startDate, endDate } = req.query;
     let responses = readResponses();
-
-    if (department) {
-      responses = responses.filter(r => r.department === department);
-    }
-    if (level) {
-      responses = responses.filter(r => r.level === level);
-    }
-    if (gender) {
-      responses = responses.filter(r => r.gender === gender);
-    }
-    if (startDate) {
-      responses = responses.filter(r => r.submittedAt >= startDate);
-    }
-    if (endDate) {
-      responses = responses.filter(r => r.submittedAt <= endDate);
-    }
+    responses = applyResponseFilters(responses, req.query);
 
     responses.sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt));
 
@@ -305,6 +312,35 @@ app.get('/api/statistics', requireAdmin, (req, res) => {
   } catch (error) {
     console.error('Error fetching statistics:', error);
     res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+// Bulk delete responses (admin only)
+app.delete('/api/responses', requireAdmin, (req, res) => {
+  try {
+    const allResponses = readResponses();
+    const filteredResponses = applyResponseFilters(allResponses, req.query);
+    const deletedCount = filteredResponses.length;
+
+    if (deletedCount === 0) {
+      return res.status(404).json({ success: false, error: 'No matching responses found' });
+    }
+
+    const filteredIds = new Set(filteredResponses.map((r) => r.id));
+    const remainingResponses = allResponses.filter((r) => !filteredIds.has(r.id));
+
+    if (writeResponses(remainingResponses)) {
+      return res.json({
+        success: true,
+        deleted: deletedCount,
+        message: `Deleted ${deletedCount} response(s) successfully`
+      });
+    }
+
+    return res.status(500).json({ success: false, error: 'Failed to delete responses' });
+  } catch (error) {
+    console.error('Error bulk deleting responses:', error);
+    return res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });
 

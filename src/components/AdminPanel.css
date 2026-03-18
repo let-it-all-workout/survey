@@ -377,6 +377,17 @@
   border-color: #d1d5db;
 }
 
+.btn-danger {
+  background: #dc2626;
+  color: white;
+  box-shadow: 0 4px 6px rgba(220, 38, 38, 0.2);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: #b91c1c;
+  box-shadow: 0 6px 12px rgba(220, 38, 38, 0.3);
+}
+
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;

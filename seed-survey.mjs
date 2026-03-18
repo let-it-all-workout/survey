@@ -48,7 +48,20 @@ const healthIssues = [
 ];
 const dependency = ['Totally fine', 'A bit uncomfortable', 'Very uncomfortable', 'Cannot imagine it'];
 const distributionWeights = {
-  department: Object.fromEntries(departmentCodes.map((code) => [code, 1])),
+  // Uneven department weights to avoid artificial equal counts.
+  department: {
+    CSC: 0.16,
+    POS: 0.12,
+    MCB: 0.11,
+    BCH: 0.10,
+    ACC: 0.10,
+    BKF: 0.08,
+    MAC: 0.08,
+    NUR: 0.10,
+    BUS: 0.06,
+    HIR: 0.04,
+    ECO: 0.05
+  },
   level: {
     '100 Level': 0.27,
     '200 Level': 0.24,
@@ -61,11 +74,12 @@ const distributionWeights = {
     Female: 0.48
   },
   hours_per_day: {
-    'Less than 1 hour': 0.05,
-    '1-3 hours': 0.23,
-    '4-6 hours': 0.35,
-    '7-9 hours': 0.25,
-    '10+ hours': 0.12
+    // Heavier usage profile (most around 6-9 hours).
+    'Less than 1 hour': 0.03,
+    '1-3 hours': 0.14,
+    '4-6 hours': 0.29,
+    '7-9 hours': 0.38,
+    '10+ hours': 0.16
   },
   academic_performance: {
     'Significantly improved': 0.07,
@@ -131,56 +145,22 @@ const pickMany = (arr, min = 1, max = 3) => {
   const count = Math.max(min, Math.min(max, Math.floor(Math.random() * (max - min + 1)) + min));
   return copy.slice(0, count);
 };
-const shuffle = (arr) => {
-  for (let i = arr.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
-  return arr;
-};
-const createBalancedPool = (options, weightMap, total) => {
-  if (total <= 0) return [];
+const pickWeighted = (options, weightMap) => {
+  const weightedOptions = options.map((option) => ({
+    option,
+    weight: Math.max(0, Number(weightMap?.[option] ?? 1))
+  }));
+  const totalWeight = weightedOptions.reduce((sum, item) => sum + item.weight, 0);
+  if (totalWeight <= 0) return pickOne(options);
 
-  const weights = options.map((option) =>
-    Math.max(0, Number(weightMap?.[option] ?? 1))
-  );
-  const weightSum = weights.reduce((sum, w) => sum + w, 0) || options.length;
-  const normalized = weights.map((w) => w / weightSum);
-  const rawCounts = normalized.map((w) => w * total);
-  const baseCounts = rawCounts.map((n) => Math.floor(n));
-  let assigned = baseCounts.reduce((sum, c) => sum + c, 0);
-
-  // Distribute remaining slots by largest fractional parts.
-  const fractions = rawCounts
-    .map((n, idx) => ({ idx, frac: n - Math.floor(n) }))
-    .sort((a, b) => b.frac - a.frac);
-
-  let ptr = 0;
-  while (assigned < total) {
-    const targetIdx = fractions[ptr % fractions.length].idx;
-    baseCounts[targetIdx] += 1;
-    assigned += 1;
-    ptr += 1;
-  }
-
-  const pool = [];
-  options.forEach((option, idx) => {
-    for (let i = 0; i < baseCounts[idx]; i += 1) {
-      pool.push(option);
+  let random = Math.random() * totalWeight;
+  for (const item of weightedOptions) {
+    random -= item.weight;
+    if (random <= 0) {
+      return item.option;
     }
-  });
-
-  return shuffle(pool);
-};
-const createBalancedPicker = (options, weightMap, total) => {
-  const pool = createBalancedPool(options, weightMap, total);
-  let cursor = 0;
-  return () => {
-    if (cursor >= pool.length) return pickOne(options);
-    const value = pool[cursor];
-    cursor += 1;
-    return value;
-  };
+  }
+  return weightedOptions[weightedOptions.length - 1].option;
 };
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const randomDelayMs = () => pickNumber(WAIT_MIN_MS, WAIT_MAX_MS);
@@ -188,19 +168,6 @@ const randomSubmittedAt = () => new Date(pickNumber(SUBMITTED_START, SUBMITTED_E
 const generatedMatricNumbers = new Set();
 const recentRecommendations = [];
 const MAX_RECENT_RECOMMENDATIONS = 35;
-const pickDepartmentBalanced = createBalancedPicker(
-  departmentCodes,
-  distributionWeights.department,
-  TOTAL
-);
-const pickLevelBalanced = createBalancedPicker(levels, distributionWeights.level, TOTAL);
-const pickGenderBalanced = createBalancedPicker(genders, distributionWeights.gender, TOTAL);
-const pickHoursBalanced = createBalancedPicker(hoursPerDay, distributionWeights.hours_per_day, TOTAL);
-const pickAcademicBalanced = createBalancedPicker(
-  academicPerformance,
-  distributionWeights.academic_performance,
-  TOTAL
-);
 const randomRecommendation = (response) => {
   const isGoodCase =
     (response.academic_performance === 'Significantly improved' ||
@@ -263,11 +230,11 @@ const makeMatric = (index = 0, departmentCode) => {
 };
 
 const buildPayload = (index) => {
-  const department = pickDepartmentBalanced();
-  const level = pickLevelBalanced();
-  const gender = pickGenderBalanced();
-  const hours = pickHoursBalanced();
-  const academic = pickAcademicBalanced();
+  const department = pickWeighted(departmentCodes, distributionWeights.department);
+  const level = pickWeighted(levels, distributionWeights.level);
+  const gender = pickWeighted(genders, distributionWeights.gender);
+  const hours = pickWeighted(hoursPerDay, distributionWeights.hours_per_day);
+  const academic = pickWeighted(academicPerformance, distributionWeights.academic_performance);
 
   const payload = {
     matric_number: makeMatric(index, department),
