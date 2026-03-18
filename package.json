@@ -8,6 +8,8 @@
     "dev:server": "cd server && npm run dev",
     "build": "vite build && cd server && npm install",
     "start": "cd server && node server.js",
+    "seed:test": "node seed-survey.mjs 5",
+    "seed:live": "SEED_API_URL=https://survey-production-7290.up.railway.app/api node seed-survey.mjs 5",
     "lint": "eslint .",
     "preview": "vite preview"
   },
