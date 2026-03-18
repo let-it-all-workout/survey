@@ -12,6 +12,9 @@ const PORT = process.env.PORT || 3001;
 const DATA_FILE = join(__dirname, 'responses.json');
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'researcher2024';
 const ALLOW_TEST_DATE_OVERRIDE = process.env.ALLOW_TEST_DATE_OVERRIDE === 'true';
+const RATE_LIMIT_WINDOW = Number(process.env.RATE_LIMIT_WINDOW_MS || 60 * 1000);
+const MAX_SUBMISSIONS_PER_WINDOW = Number(process.env.MAX_SUBMISSIONS_PER_WINDOW || 3);
+const SEED_BYPASS_TOKEN = process.env.SEED_BYPASS_TOKEN || '';
 
 // Middleware
 app.use(cors());
@@ -19,8 +22,6 @@ app.use(express.json({ limit: '50kb' }));
 
 // Rate limiting - simple in-memory tracker
 const rateLimitMap = new Map();
-const RATE_LIMIT_WINDOW = 60 * 1000; // 1 minute
-const MAX_SUBMISSIONS_PER_WINDOW = 3;
 
 const checkRateLimit = (ip) => {
   const now = Date.now();
@@ -97,6 +98,13 @@ const parseOverrideDate = (value) => {
   return parsed.toISOString();
 };
 
+const canBypassRateLimit = (req) => {
+  if (!SEED_BYPASS_TOKEN) return false;
+  const seedHeader = req.headers['x-seed-token'];
+  // Allow bypass only for explicit seeded submissions with override date.
+  return seedHeader === SEED_BYPASS_TOKEN && typeof req.body?.submittedAtOverride === 'string';
+};
+
 // Whitelist of allowed fields from the survey
 const ALLOWED_FIELDS = [
   'matric_number', 'department', 'department_other', 'level', 'gender',
@@ -121,8 +129,8 @@ app.post('/api/admin/login', (req, res) => {
 app.post('/api/responses', (req, res) => {
   try {
     const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
-
-    if (!checkRateLimit(clientIp)) {
+    const bypassRateLimit = canBypassRateLimit(req);
+    if (!bypassRateLimit && !checkRateLimit(clientIp)) {
       return res.status(429).json({
         success: false,
         error: 'Too many submissions. Please wait a minute before trying again.'
