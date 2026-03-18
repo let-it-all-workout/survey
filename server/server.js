@@ -1,6 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, copyFileSync, renameSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
@@ -10,6 +10,8 @@ const __dirname = dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3001;
 const DATA_FILE = join(__dirname, 'responses.json');
+const DATA_BACKUP_FILE = join(__dirname, 'responses.backup.json');
+const DATA_TEMP_FILE = join(__dirname, 'responses.tmp.json');
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'researcher2024';
 const ALLOW_TEST_DATE_OVERRIDE = process.env.ALLOW_TEST_DATE_OVERRIDE === 'true';
 const RATE_LIMIT_WINDOW = Number(process.env.RATE_LIMIT_WINDOW_MS || 60 * 1000);
@@ -61,23 +63,53 @@ const requireAdmin = (req, res, next) => {
 
 // Initialize data file if it doesn't exist
 if (!existsSync(DATA_FILE)) {
-  writeFileSync(DATA_FILE, JSON.stringify([], null, 2));
+  if (existsSync(DATA_BACKUP_FILE)) {
+    copyFileSync(DATA_BACKUP_FILE, DATA_FILE);
+    console.warn('Recovered responses.json from backup file.');
+  } else {
+    writeFileSync(DATA_FILE, JSON.stringify([], null, 2));
+  }
 }
 
 // Helper functions
 const readResponses = () => {
+  const parseArrayFile = (path) => {
+    const raw = readFileSync(path, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      throw new Error(`${path} does not contain an array`);
+    }
+    return parsed;
+  };
+
   try {
-    const data = readFileSync(DATA_FILE, 'utf8');
-    return JSON.parse(data);
+    return parseArrayFile(DATA_FILE);
   } catch (error) {
-    console.error('Error reading responses:', error);
-    return [];
+    console.error('Error reading primary responses file:', error.message);
+    if (existsSync(DATA_BACKUP_FILE)) {
+      try {
+        const recovered = parseArrayFile(DATA_BACKUP_FILE);
+        console.warn('Using backup responses file due to primary file read failure.');
+        return recovered;
+      } catch (backupError) {
+        console.error('Error reading backup responses file:', backupError.message);
+      }
+    }
+
+    throw new Error('Unable to read survey responses safely');
   }
 };
 
 const writeResponses = (responses) => {
   try {
-    writeFileSync(DATA_FILE, JSON.stringify(responses, null, 2));
+    // Keep a backup of the last known-good file.
+    if (existsSync(DATA_FILE)) {
+      copyFileSync(DATA_FILE, DATA_BACKUP_FILE);
+    }
+
+    // Atomic-ish write: write temp then rename.
+    writeFileSync(DATA_TEMP_FILE, JSON.stringify(responses, null, 2));
+    renameSync(DATA_TEMP_FILE, DATA_FILE);
     return true;
   } catch (error) {
     console.error('Error writing responses:', error);

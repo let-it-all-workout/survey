@@ -190,7 +190,7 @@ const AdminPanel = ({ onBack }) => {
             <div className="stat-card">
               <div className="stat-title">By Department</div>
               <div className="stat-list">
-                {statistics.departmentStats?.slice(0, 5).map((stat, idx) => (
+                {statistics.departmentStats?.map((stat, idx) => (
                   <div key={idx} className="stat-item">
                     <span>{stat.department}</span>
                     <span className="stat-count">{stat.count}</span>
